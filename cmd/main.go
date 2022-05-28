@@ -52,13 +52,6 @@ func createDatabase(databaseName string) {
 	} else {
 		fmt.Printf("Database [%v] created. ActivityId %s\n", databaseName, databaseResponse.ActivityID)
 	}
-	//Delcared but not used
-	/*database, err := client.NewDatabase(databaseName)
-	if err != nil {
-		var responseErr *azcore.ResponseError
-		errors.As(err, &responseErr)
-		panic(responseErr)
-	}*/
 }
 
 func createContainer(databaseName string, containerName string, partitionKey string) {
