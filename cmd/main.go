@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"strings"
 
 	"github.com/Azure/azure-sdk-for-go/sdk/azcore"
 	"github.com/Azure/azure-sdk-for-go/sdk/data/azcosmos"
@@ -270,10 +271,44 @@ func main() {
 	var databaseName = "myDatabase"
 	var containerName = "myContainer"
 	var partitionKey = "/myPartitionKey"
+	var exit bool
+	var result string
 
-	createDatabase(databaseName)
-	createContainer(databaseName, containerName, partitionKey)
-	createItem(databaseName, containerName)
-	queryItems(containerName, databaseName)
-	pointRead(databaseName, containerName)
+	for !exit {
+		fmt.Println("\nAzure Cosmos DB Golang SDK Examples")
+		fmt.Println("-----------------------------------------");
+		fmt.Println("[a]   Query for single customer");
+		fmt.Println("[b]   Point read for single customer");
+		fmt.Println("[c]   Create item");
+		fmt.Println("[d]   List all product categories");
+		fmt.Println("[e]   Query products by category id");
+		fmt.Println("[f]   Update product category name");
+		fmt.Println("[g]   Query orders by customer id");
+		fmt.Println("[h]   Query for customer and all orders");
+		fmt.Println("[i]   Create new order and update order total");
+		fmt.Println("[j]   Delete order and update order total");
+		fmt.Println("[k]   Query top 10 customers");
+		fmt.Println("-------------------------------------------");
+		fmt.Println("[l]   Create databases and containers");
+		fmt.Println("[m]   Upload data to containers");
+		fmt.Println("[o]   Delete databases and containers");
+		fmt.Println("-------------------------------------------");
+		fmt.Println("[x]   Exit");
+		fmt.Scanln((&result))
+		fmt.Printf("\nYour selection is: %v\n",result)
+
+		if strings.ContainsRune(result, 'a') {
+        	//TODO: clear console
+			queryItems(containerName, databaseName)
+		} else if strings.ContainsRune(result, 'b') {
+			pointRead(databaseName, containerName)
+		} else if strings.ContainsRune(result, 'c') {
+			createItem(databaseName,containerName)
+		} else if strings.ContainsRune(result, 'l') {
+			createDatabase(databaseName)
+			createContainer(databaseName, containerName, partitionKey)
+ 		} else {		
+			exit = true
+        }
+	}
 }
