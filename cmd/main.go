@@ -304,6 +304,22 @@ func main() {
 			pointRead(databaseName, containerName)
 		} else if strings.ContainsRune(result, 'c') {
 			createItem(databaseName,containerName)
+		} else if strings.ContainsRune(result, 'd') {
+			fmt.Printf("TODO: Hasn't been implemented yet.")
+		} else if strings.ContainsRune(result, 'e') {
+			fmt.Printf("TODO: Hasn't been implemented yet.")
+		} else if strings.ContainsRune(result, 'f') {
+			fmt.Printf("TODO: Hasn't been implemented yet.")
+		} else if strings.ContainsRune(result, 'g') {
+			fmt.Printf("TODO: Hasn't been implemented yet.")
+		} else if strings.ContainsRune(result, 'h') {
+			fmt.Printf("TODO: Hasn't been implemented yet.")
+		} else if strings.ContainsRune(result, 'i') {
+			fmt.Printf("TODO: Hasn't been implemented yet.")
+		} else if strings.ContainsRune(result, 'j') {
+			fmt.Printf("TODO: Hasn't been implemented yet.")
+		} else if strings.ContainsRune(result, 'k') {
+			fmt.Printf("TODO: Hasn't been implemented yet.")
 		} else if strings.ContainsRune(result, 'l') {
 			createDatabase(databaseName)
 			createContainer(databaseName, containerName, partitionKey)
