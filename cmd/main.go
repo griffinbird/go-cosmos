@@ -278,8 +278,8 @@ func ListAllProductCategories(client *azcosmos.Client, containerName, databaseNa
 }
 
 func QueryProductsByCategoryId(client *azcosmos.Client, databaseName, containerName string) error {
-	//Category Name = Components, Headsets
-	pk := azcosmos.NewPartitionKeyString("AB952F9F-5ABA-4251-BC2D-AFF8DF412A4A")
+	//Category Name = Accessories, Tires and Tubes
+	pk := azcosmos.NewPartitionKeyString("86F3CBAB-97A7-4D01-BABB-ADEFFFAED6B4")
 
 	log.Printf("Retreiving all products by categoryId [%v] in [%v\\%v]", pk, databaseName, containerName)
 	container, err := client.NewContainer(databaseName, containerName)
@@ -307,6 +307,10 @@ func QueryProductsByCategoryId(client *azcosmos.Client, databaseName, containerN
 		}
 		log.Printf("Query page received with %d items. Status %d. ActivityId %s. Consuming %v RU\n", len(queryResponse.Items), queryResponse.RawResponse.StatusCode, queryResponse.ActivityID, queryResponse.RequestCharge)
 	}
+	return nil
+}
+
+func RefreshProductCategory (client *azcosmos.Client, databaseName, containerName string) error {
 	return nil
 }
 
@@ -349,45 +353,34 @@ func QueryProductsForCategory(client *azcosmos.Client, databaseName, containerNa
 	return nil
 }
 
-func UpdateProductCategory(client *azcosmos.Client, databaseName, containerName string) error {
+func UpdateCategoryName(client *azcosmos.Client, databaseName, categoryID, categoryName string) error {
+	containerName := "productCategory"
+	pkName := "category"
+	item, err := pointRead(client, databaseName, containerName, pkName, categoryID)
+	if err != nil {
+		return err
+	}
 
-	categoryId := "86F3CBAB-97A7-4D01-BABB-ADEFFFAED6B4" //Category Name = Accessories, Tires and Tubes
-	pk := azcosmos.NewPartitionKeyString("category")
+	// update value field
+	item["value"] = categoryName
+
+
+	b, err := json.Marshal(item)
+	if err != nil {
+		return err
+	}
 
 	container, err := client.NewContainer(databaseName, containerName)
 	if err != nil {
 		return err
 	}
-	fmt.Printf("Update the name and replace 'and' with '&' for categoryID [%v] in [%v/%v]\n", categoryId, databaseName, containerName)
 
-	item := map[string]string{
-		"id":    categoryId,
-		"type":  "category",
-		"value": "Accessories, Tires & Tubes",
-	}
-
-	marshalled, err := json.MarshalIndent(item, "", "  ")
-	if err != nil {
-		fmt.Printf("Error parsing JSON string - %s", err)
-	}
-
-	itemResponse, err := container.ReplaceItem(context.Background(), pk, categoryId, marshalled, &azcosmos.ItemOptions{EnableContentResponseOnWrite: true})
-	if err != nil {
-		fmt.Printf("Failed to replace item: %v\n", err)
-	}
-
-	id := categoryId
-	item1, err := pointRead(client, "database-v3", "productCategory", "category", id)
+	pk := azcosmos.NewPartitionKeyString(pkName)
+	res, err := container.UpsertItem(context.Background(), pk, b, nil)
 	if err != nil {
 		return err
 	}
-	b, err := json.MarshalIndent(item1, "", "    ")
-	if err != nil {
-		return err
-	}
-	fmt.Printf("%s\n", b)
-
-	log.Printf("Item [%v] updated. Status %d. ActivityId %s. Consuming %v RU\n", categoryId, itemResponse.RawResponse.StatusCode, itemResponse.ActivityID, itemResponse.RequestCharge)
+	_= res
 
 	return nil
 }
@@ -840,11 +833,18 @@ out:
 			if err != nil {
 				return err
 			}
-			err = UpdateProductCategory(client, databaseName, "productCategory")
+			categoryId := "86F3CBAB-97A7-4D01-BABB-ADEFFFAED6B4"
+			categoryName1 := "Accessories, Tires and Tubes"
+			categoryName2 := "Accessories, Tires & Tubes"
+			err = UpdateCategoryName(client, databaseName, categoryId, categoryName1)
 			if err != nil {
 				return err
 			}
 			err = QueryProductsForCategory(client, databaseName, "product")
+			if err != nil {
+				return err
+			}
+			err = UpdateCategoryName(client, databaseName, categoryId, categoryName2)
 			if err != nil {
 				return err
 			}
@@ -897,18 +897,18 @@ out:
 					Database:  "database-v2",
 					Container: "productCategory",
 				}, */
-				/* 				{
+				{
 					URL:       "https://raw.githubusercontent.com/MicrosoftDocs/mslearn-cosmosdb-modules-central/main/data/fullset/database-v3/product",
 					PK:        "categoryId",
 					Database:  "database-v3",
 					Container: "product",
-				}, */
-				{
+				},
+/* 				{
 					URL:       "https://raw.githubusercontent.com/MicrosoftDocs/mslearn-cosmosdb-modules-central/main/data/fullset/database-v3/productCategory",
 					PK:        "type",
 					Database:  "database-v3",
 					Container: "productCategory",
-				},
+				}, */
 				/* {
 					URL:       "https://raw.githubusercontent.com/MicrosoftDocs/mslearn-cosmosdb-modules-central/main/data/fullset/database-v4/customer",
 					PK:        "customerId",
