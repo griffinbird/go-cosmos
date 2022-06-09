@@ -114,48 +114,6 @@ func createContainer(databaseName string, containerName string, partitionKey str
 	}
 }
 
-func createItem(client *azcosmos.Client, databaseName, containerName, id string, item map[string]interface{}) error {
-	log.Printf("Creating Item in %v\\%v\n", databaseName, containerName)
-
-	container, err := client.NewContainer(databaseName, containerName)
-	if err != nil {
-		return err
-	}
-
-	b, err := json.Marshal(item)
-	if err != nil {
-		return err
-	}
-	pk := azcosmos.NewPartitionKeyString(id)
-	ctx := context.Background()
-	options := &azcosmos.ItemOptions{EnableContentResponseOnWrite: false}
-
-	itemResponse, err := container.CreateItem(ctx, pk, b, options)
-	if err != nil {
-		var responseErr *azcore.ResponseError
-		if errors.As(err, &responseErr) {
-			if responseErr.ErrorCode == "Conflict" {
-				log.Printf("Item already exists: %s\n", id)
-			} else {
-				return err
-			}
-		}
-	} else {
-		map1 := map[string]interface{}{}
-		err = json.Unmarshal(b, &map1)
-		if err != nil {
-			return err
-		}
-		b, err = json.MarshalIndent(map1, "", "    ")
-		if err != nil {
-			return err
-		}
-		fmt.Printf("%s\n", b)
-		log.Printf("Status %d. Item %v created. ActivityId %s. Consuming %v RU\n", itemResponse.RawResponse.StatusCode, id, itemResponse.ActivityID, itemResponse.RequestCharge)
-	}
-	return nil
-}
-
 func deleteItem(client *azcosmos.Client, databaseName, containerName, partitionKey, id string) (map[string]interface{}, error) {
 	pk := azcosmos.NewPartitionKeyString(partitionKey)
 
@@ -488,77 +446,106 @@ func QueryCustomerAndSalesOrdersByCustomerId(client *azcosmos.Client, containerN
 	return nil
 }
 
-func CreateNewOrderAndUpdateCustomerOrderTotal(client *azcosmos.Client, containerName, databaseName string) error {
-	//orderId := uuid.New()
-	//orderId := "FFD0DD37-1F0E-4E2E-8FAC-EAF45B0E9447f"
-	pk := azcosmos.NewPartitionKeyString("FFD0DD37-1F0E-4E2E-8FAC-EAF45B0E9447")
-	customerId := "FFD0DD37-1F0E-4E2E-8FAC-EAF45B0E9447"
+func CreateNewOrderAndUpdateCustomerOrderTotal(client *azcosmos.Client, databaseName, containerName, id string, item map[string]interface{}) error {
+	log.Printf("Creating a new Order %v in %v\\%v\n",id, databaseName, containerName)
 
 	container, err := client.NewContainer(databaseName, containerName)
 	if err != nil {
 		return err
 	}
-	fmt.Printf("Update sales order count and create a new sales order for customerId [%v] in [%v/%v]\n", customerId, databaseName, containerName)
 
-	const jsonSalesOrder = `
-	{
-		"customerId": "FFD0DD37-1F0E-4E2E-8FAC-EAF45B0E9447f",
-		"details": [
-			{
-				"name": "Road-550-W Yellow, 42",
-				"price": 1120.49,
-				"quantity": 1,
-				"sku": "BK-R64Y-42"
-			},
-			{
-				"name": "Sport-100 Helmet, Blue",
-				"price": 34.99,
-				"quantity": 1,
-				"sku": "HL-U509-B"
+	b, err := json.Marshal(item)
+	if err != nil {
+		return err
+	}
+	pk := azcosmos.NewPartitionKeyString(id)
+	ctx := context.Background()
+	options := &azcosmos.ItemOptions{EnableContentResponseOnWrite: false}
+
+	itemResponse, err := container.CreateItem(ctx, pk, b, options)
+	if err != nil {
+		var responseErr *azcore.ResponseError
+		if errors.As(err, &responseErr) {
+			if responseErr.ErrorCode == "Conflict" {
+				log.Printf("Customer order already exists: %s\n", id)
+			} else {
+				return err
 			}
-		],
-		"id": "5350ce31-ea50-4df9-9a48-faff97675ac5",
-		"orderDate": "2014-02-16T00:00:00",
-		"shipDate": "",
-		"type": "salesOrder"
-	}
-	`
-	reader := strings.NewReader(jsonSalesOrder)
-	dec := json.NewDecoder(reader)
-
-	for {
-		//read one JSON oject and store it in a map
-		var m map[string]interface{}
-		if err := dec.Decode(&m); err == io.EOF {
-			break
-		} else if err != nil {
-			log.Fatal(err)
 		}
+	} else {
+		map1 := map[string]interface{}{}
+		err = json.Unmarshal(b, &map1)
+		if err != nil {
+			return err
+		}
+		b, err = json.MarshalIndent(map1, "", "    ")
+		if err != nil {
+			return err
+		}
+		fmt.Printf("%s\n", b)
+		log.Printf("Status %d. Item %v created. ActivityId %s. Consuming %v RU\n", itemResponse.RawResponse.StatusCode, id, itemResponse.ActivityID, itemResponse.RequestCharge)
 	}
-
-	marshalled, err := json.MarshalIndent(jsonSalesOrder, "", "  ")
-	if err != nil {
-		fmt.Printf("Error parsing JSON string - %s", err)
-	}
-
-	itemResponse, err := container.CreateItem(context.Background(), pk, marshalled, nil)
-	if err != nil {
-		fmt.Printf("Failed to create item: %v\n", err)
-	}
-
-	/* item1, err := pointRead(client, "database-v3", "productCategory", "category", id)
-	if err != nil {
-		return err
-	}
-	b, err := json.MarshalIndent(item1, "", "    ")
-	if err != nil {
-		return err
-	}
-	fmt.Printf("%s\n", b) */
-
-	log.Printf("Item [%v] updated. Status %d. ActivityId %s. Consuming %v RU\n", pk, itemResponse.RawResponse.StatusCode, itemResponse.ActivityID, itemResponse.RequestCharge)
-
 	return nil
+}
+
+func DeleteCustomerOrder(client *azcosmos.Client, databaseName, containerName, orderId, customerId string) error {
+	pk := azcosmos.NewPartitionKeyString(customerId)
+
+	log.Printf("Deleting customer order %v\n", customerId)
+
+	container, err := client.NewContainer(databaseName, containerName)
+	if err != nil {
+		return err
+	}
+
+	itemResponse, err := container.DeleteItem(context.Background(), pk, orderId, nil)
+	if err != nil {
+		var responseErr *azcore.ResponseError
+		errors.As(err, &responseErr)
+		return err
+	}
+	log.Printf("Customer Order [%v] deleted. Status %d. ActivityId %s. Consuming %v RU\n", customerId, itemResponse.RawResponse.StatusCode, itemResponse.ActivityID, itemResponse.RequestCharge)
+	return err
+}
+
+func GetTop10Customers (client *azcosmos.Client, databaseName, containerName string) error {
+	//Query to get our top 10 customers
+	customerId := "FFCAE1E9-7E8D-457B-8435-BB7992C6D8BF"
+	pk := azcosmos.NewPartitionKeyString(customerId)
+
+	log.Printf("Print out top 10 customers and number of orders in %v\\%v\n", databaseName, containerName)
+
+	container, err := client.NewContainer(databaseName, containerName)
+
+	if err != nil {
+		return err
+	}
+	query := "SELECT TOP 10 c.firstName, c.lastName, c.salesOrderCount " +
+	"FROM c WHERE c.type = 'customer' " +
+	"ORDER BY c.salesOrderCount DESC"
+	queryPager := container.NewQueryItemsPager(query, pk, &azcosmos.QueryOptions{PopulateIndexMetrics: true})
+	for queryPager.More() {
+		queryResponse, err := queryPager.NextPage(context.Background())
+		if err != nil {
+			return err
+		}
+		for _, item := range queryResponse.Items {
+			map1 := map[string]interface{}{}
+			err := json.Unmarshal(item, &map1)
+			if err != nil {
+				return err
+			}
+			b, err := json.MarshalIndent(map1, "", "    ")
+			if err != nil {
+				return err
+			}
+			// print Customer name: \t Orders:  (customer per line)
+			fmt.Printf("%s\n", b)
+		}
+		log.Printf("Query page received with %d items. Status %d. ActivityId %s. Consuming %v RU\n", len(queryResponse.Items), queryResponse.RawResponse.StatusCode, queryResponse.ActivityID, queryResponse.RequestCharge)
+	}
+	return nil
+
 
 }
 
@@ -753,23 +740,23 @@ func run() error {
 		return err
 	}
 
+// Fix up lettering
 	prompt := `Azure Cosmos DB Golang SDK Examples
 -----------------------------------------
 [a]   Query for single customer
 [b]   Point read for single customer
-[c]   Create item
-[d]   List all product categories
-[e]   Query products by category id
-[f]   Update product category name
-[g]   Query orders by customer id
-[h]   Query for customer and all orders
-[i]   Create new order and update order total
-[j]   Delete order and update order total
-[k]   Query top 10 customers
+[c]   List all product categories
+[d]   Query products by category id
+[e]   Update product category name
+[f]   Query orders by customer id
+[g]   Query for customer and all orders
+[h]   Create new order and update order total
+[i]   Delete order and update order total
+[j]   Query top 10 customers
 -------------------------------------------
-[l]   Create databases and containers
-[m]   Upload data to containers
-[o]   Delete databases and containers
+[k]   Create databases and containers
+[l]   Upload data to containers
+[m]   Delete databases and containers
 -------------------------------------------
 [x]   Exit
 
@@ -806,6 +793,60 @@ out:
 			}
 			fmt.Printf("%s\n", b)
 		case "c":
+			databaseName := "database-v2"
+			containerName := "productCategory"
+			err := ListAllProductCategories(client, containerName, databaseName)
+			if err != nil {
+				return err
+			}
+		case "d":
+			databaseName := "database-v4"
+			containerName := "product"
+			err := QueryProductsByCategoryId(client, databaseName, containerName)
+			if err != nil {
+				return err
+			}
+		case "e":
+			// TODO - need to validate if the logic is correct
+			databaseName := "database-v3"
+			err := QueryProductsForCategory(client, databaseName, "product")
+			if err != nil {
+				return err
+			}
+			categoryId := "86F3CBAB-97A7-4D01-BABB-ADEFFFAED6B4"
+			categoryName1 := "Accessories, Tires and Tubes"
+			categoryName2 := "Accessories, Tires & Tubes"
+			err = UpdateCategoryName(client, databaseName, categoryId, categoryName1)
+			if err != nil {
+				return err
+			}
+			err = QueryProductsForCategory(client, databaseName, "product")
+			if err != nil {
+				return err
+			}
+			err = UpdateCategoryName(client, databaseName, categoryId, categoryName2)
+			if err != nil {
+				return err
+			}
+			err = RevertProductCategory(client, databaseName, "productCategory")
+			if err != nil {
+				return err
+			}
+		case "f":
+			databaseName := "database-v4"
+			containerName := "customer"
+			err := QuerySalesOrdersByCustomerId(client, containerName, databaseName)
+			if err != nil {
+				return err
+			}
+		case "g":
+			databaseName := "database-v4"
+			containerName := "customer"
+			err := QueryCustomerAndSalesOrdersByCustomerId(client, containerName, databaseName)
+			if err != nil {
+				return err
+			}
+		case "h":
 			b := `
 			{
 				"customerId": "54AB87A7-BDB9-4FAE-A668-AA9F43E26628",
@@ -850,77 +891,26 @@ out:
 			customerID = uuid.New().String()
 			item["customerId"] = customerID
 
-			err = createItem(client, databaseName, containerName, customerID, item)
-			if err != nil {
-				return err
-			}
-
-		case "d":
-			databaseName := "database-v2"
-			containerName := "productCategory"
-			err := ListAllProductCategories(client, containerName, databaseName)
-			if err != nil {
-				return err
-			}
-		case "e":
-			databaseName := "database-v4"
-			containerName := "product"
-			err := QueryProductsByCategoryId(client, databaseName, containerName)
-			if err != nil {
-				return err
-			}
-		case "f":
-			databaseName := "database-v3"
-			err := QueryProductsForCategory(client, databaseName, "product")
-			if err != nil {
-				return err
-			}
-			categoryId := "86F3CBAB-97A7-4D01-BABB-ADEFFFAED6B4"
-			categoryName1 := "Accessories, Tires and Tubes"
-			categoryName2 := "Accessories, Tires & Tubes"
-			err = UpdateCategoryName(client, databaseName, categoryId, categoryName1)
-			if err != nil {
-				return err
-			}
-			err = QueryProductsForCategory(client, databaseName, "product")
-			if err != nil {
-				return err
-			}
-			err = UpdateCategoryName(client, databaseName, categoryId, categoryName2)
-			if err != nil {
-				return err
-			}
-			err = RevertProductCategory(client, databaseName, "productCategory")
-			if err != nil {
-				return err
-			}
-		case "g":
-			databaseName := "database-v4"
-			containerName := "customer"
-			err := QuerySalesOrdersByCustomerId(client, containerName, databaseName)
-			if err != nil {
-				return err
-			}
-		case "h":
-			databaseName := "database-v4"
-			containerName := "customer"
-			err := QueryCustomerAndSalesOrdersByCustomerId(client, containerName, databaseName)
+			err = CreateNewOrderAndUpdateCustomerOrderTotal(client, databaseName, containerName, customerID, item)
 			if err != nil {
 				return err
 			}
 		case "i":
-			databaseName := "database-v4"
-			containerName := "customer"
-			err := CreateNewOrderAndUpdateCustomerOrderTotal(client, containerName, databaseName)
-			if err != nil {
+			orderId := "000C23D8-B8BC-432E-9213-6473DFDA2BC5"
+			customerId := "54AB87A7-BDB9-4FAE-A668-AA9F43E26628"
+			if err := DeleteCustomerOrder(client, databaseName, containerName, orderId, customerId ); err != nil {
 				return err
 			}
-		case "l":
+		case "j":
+			if err := GetTop10Customers(client, databaseName, containerName); err != nil {
+				return err
+			}
+		case "k":
 			if err := CreateDatabase(client); err != nil {
 				return err
 			}
 			//createContainer(databaseName, containerName, partitionKey)
-		case "m":
+		case "l":
 			imports := []struct {
 				URL       string
 				PK        string
@@ -980,7 +970,7 @@ out:
 					return err
 				}
 			}
-		case "o":
+		case "m":
 			if err := DeleteDatabase(client); err != nil {
 				return err
 			}
