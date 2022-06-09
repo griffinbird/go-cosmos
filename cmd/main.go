@@ -14,10 +14,9 @@ import (
 	"time"
 
 	"github.com/Azure/azure-sdk-for-go/sdk/azcore"
+	"github.com/Azure/azure-sdk-for-go/sdk/azidentity"
 	"github.com/Azure/azure-sdk-for-go/sdk/data/azcosmos"
 	"github.com/google/uuid"
-	//"github.com/Azure/azure-sdk-for-go/sdk/internal/uuid"
-	//"github.com/google/uuid"
 )
 
 /*
@@ -35,16 +34,28 @@ func newClientFromEnviroment() (*azcosmos.Client, error) {
 	}
 
 	key := os.Getenv("AZURE_COSMOS_KEY")
-	if key == "" {
-		return nil, errors.New("AZURE_COSMOS_KEY could not be found")
+
+	if key != "" {
+
+		cred, err := azcosmos.NewKeyCredential(key)
+		if err != nil {
+			return nil, err
+		}
+
+		client, err := azcosmos.NewClientWithKey(endpoint, cred, nil)
+		if err != nil {
+			return nil, err
+		}
+
+		return client, nil
 	}
 
-	cred, err := azcosmos.NewKeyCredential(key)
+	cred, err := azidentity.NewDefaultAzureCredential(nil)
 	if err != nil {
 		return nil, err
 	}
 
-	client, err := azcosmos.NewClientWithKey(endpoint, cred, nil)
+	client, err := azcosmos.NewClient(endpoint, cred, nil)
 	if err != nil {
 		return nil, err
 	}
@@ -103,62 +114,46 @@ func createContainer(databaseName string, containerName string, partitionKey str
 	}
 }
 
-func createItem(databaseName string, containerName string) {
-	//Add an item to the container7
-	id := uuid.New()
-	fmt.Printf("\nCreating Item in %v\\%v\n", databaseName, containerName)
-	pk := azcosmos.NewPartitionKeyString("category")
-	item := map[string]string{
-		"id":   id.String(),
-		"name": "Bikes, BMX",
-		"type": "category",
-	}
-
-	endpoint, ok := os.LookupEnv("AZURE_COSMOS_ENDPOINT")
-	if !ok {
-		panic("AZURE_COSMOS_ENDPOINT could not be found")
-	}
-
-	key, ok := os.LookupEnv("AZURE_COSMOS_KEY")
-	if !ok {
-		panic("AZURE_COSMOS_KEY could not be found")
-	}
-
-	fmt.Println(os.ExpandEnv("Using Cosmos DB Endpoint $AZURE_COSMOS_ENDPOINT"))
-
-	cred, err := azcosmos.NewKeyCredential(key)
-	if err != nil {
-		panic(err)
-	}
-
-	client, err := azcosmos.NewClientWithKey(endpoint, cred, nil)
-	if err != nil {
-		panic(err)
-	}
+func createItem(client *azcosmos.Client, databaseName, containerName, id string, item map[string]interface{}) error {
+	log.Printf("Creating Item in %v\\%v\n", databaseName, containerName)
 
 	container, err := client.NewContainer(databaseName, containerName)
 	if err != nil {
-		panic(err)
+		return err
 	}
 
-	marshalled, err := json.MarshalIndent(item, "", "  ")
+	b, err := json.Marshal(item)
 	if err != nil {
-		fmt.Printf("Error parsing JSON string - %s", err)
+		return err
 	}
+	pk := azcosmos.NewPartitionKeyString(id)
+	ctx := context.Background()
+	options := &azcosmos.ItemOptions{EnableContentResponseOnWrite: false}
 
-	itemResponse, err := container.CreateItem(context.Background(), pk, marshalled, nil)
+	itemResponse, err := container.CreateItem(ctx, pk, b, options)
 	if err != nil {
 		var responseErr *azcore.ResponseError
-		errors.As(err, &responseErr)
-		if responseErr.ErrorCode == "Conflict" {
-			log.Printf("Item %v already exists\n", pk)
-		} else {
-			panic(responseErr)
+		if errors.As(err, &responseErr) {
+			if responseErr.ErrorCode == "Conflict" {
+				log.Printf("Item already exists: %s\n", id)
+			} else {
+				return err
+			}
 		}
 	} else {
-		fmt.Println((string(marshalled)))
-		fmt.Printf("Status %d. Item %v created. ActivityId %s. Consuming %v RU\n", itemResponse.RawResponse.StatusCode, pk, itemResponse.ActivityID, itemResponse.RequestCharge)
+		map1 := map[string]interface{}{}
+		err = json.Unmarshal(b, &map1)
+		if err != nil {
+			return err
+		}
+		b, err = json.MarshalIndent(map1, "", "    ")
+		if err != nil {
+			return err
+		}
+		fmt.Printf("%s\n", b)
+		log.Printf("Status %d. Item %v created. ActivityId %s. Consuming %v RU\n", itemResponse.RawResponse.StatusCode, id, itemResponse.ActivityID, itemResponse.RequestCharge)
 	}
+	return nil
 }
 
 func deleteItem(client *azcosmos.Client, databaseName, containerName, partitionKey, id string) (map[string]interface{}, error) {
@@ -310,7 +305,7 @@ func QueryProductsByCategoryId(client *azcosmos.Client, databaseName, containerN
 	return nil
 }
 
-func RefreshProductCategory (client *azcosmos.Client, databaseName, containerName string) error {
+func RefreshProductCategory(client *azcosmos.Client, databaseName, containerName string) error {
 	return nil
 }
 
@@ -364,7 +359,6 @@ func UpdateCategoryName(client *azcosmos.Client, databaseName, categoryID, categ
 	// update value field
 	item["value"] = categoryName
 
-
 	b, err := json.Marshal(item)
 	if err != nil {
 		return err
@@ -380,7 +374,7 @@ func UpdateCategoryName(client *azcosmos.Client, databaseName, categoryID, categ
 	if err != nil {
 		return err
 	}
-	_= res
+	_ = res
 
 	return nil
 }
@@ -412,7 +406,7 @@ func RevertProductCategory(client *azcosmos.Client, databaseName, containerName 
 	}
 	fmt.Printf("Change category name back to the original (Accessories, Tires and Tubes)\n")
 	log.Printf("Item [%v] read. Status %d. ActivityId %s. Consuming %v RU\n", categoryId, itemResponse.RawResponse.StatusCode, itemResponse.ActivityID, itemResponse.RequestCharge)
-	
+
 	id := categoryId
 	item1, err := pointRead(client, "database-v3", "productCategory", "category", id)
 	if err != nil {
@@ -433,7 +427,7 @@ func QuerySalesOrdersByCustomerId(client *azcosmos.Client, containerName, databa
 	log.Printf("Print out all sales orders for customer with PK [%v] in %v\\%v\n", pk, databaseName, containerName)
 
 	container, err := client.NewContainer(databaseName, containerName)
-	
+
 	if err != nil {
 		return err
 	}
@@ -812,7 +806,55 @@ out:
 			}
 			fmt.Printf("%s\n", b)
 		case "c":
-			createItem(databaseName, containerName)
+			b := `
+			{
+				"customerId": "54AB87A7-BDB9-4FAE-A668-AA9F43E26628",
+				"details": [
+					{
+						"name": "Road-550-W Yellow, 42",
+						"price": 1120.49,
+						"quantity": 1,
+						"sku": "BK-R64Y-42"
+					},
+					{
+						"name": "Sport-100 Helmet, Blue",
+						"price": 34.99,
+						"quantity": 1,
+						"sku": "HL-U509-B"
+					}
+				],
+				"id": "000C23D8-B8BC-432E-9213-6473DFDA2BC5",
+				"orderDate": "2014-02-16T00:00:00",
+				"shipDate": "2014-02-23T00:00:00",
+				"type": "salesOrder"
+			}			
+			`
+			item := map[string]interface{}{}
+			err := json.Unmarshal([]byte(b), &item)
+			if err != nil {
+				return err
+			}
+
+			customerID := ""
+			if item, ok := item["customerId"]; ok {
+				if val, ok := item.(string); ok {
+					customerID = val
+				}
+			}
+
+			if customerID == "" {
+				return errors.New("customerID is empty")
+			}
+
+			// check UUID option
+			customerID = uuid.New().String()
+			item["customerId"] = customerID
+
+			err = createItem(client, databaseName, containerName, customerID, item)
+			if err != nil {
+				return err
+			}
+
 		case "d":
 			databaseName := "database-v2"
 			containerName := "productCategory"
@@ -867,12 +909,12 @@ out:
 				return err
 			}
 		case "i":
-		databaseName := "database-v4"
-		containerName := "customer"
-		err := CreateNewOrderAndUpdateCustomerOrderTotal(client, containerName, databaseName)
-		if err != nil {
-			return err
-		}
+			databaseName := "database-v4"
+			containerName := "customer"
+			err := CreateNewOrderAndUpdateCustomerOrderTotal(client, containerName, databaseName)
+			if err != nil {
+				return err
+			}
 		case "l":
 			if err := CreateDatabase(client); err != nil {
 				return err
@@ -903,7 +945,7 @@ out:
 					Database:  "database-v3",
 					Container: "product",
 				},
-/* 				{
+				/* 				{
 					URL:       "https://raw.githubusercontent.com/MicrosoftDocs/mslearn-cosmosdb-modules-central/main/data/fullset/database-v3/productCategory",
 					PK:        "type",
 					Database:  "database-v3",
