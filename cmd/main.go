@@ -19,13 +19,6 @@ import (
 	"github.com/google/uuid"
 )
 
-/*
-Questions
-- If I have created client, and then create connection etc.. ie client.ReadItem(....). then I want to interact with
-item.x etc to access the item. Look at update product function for example. how to keep using the same item. or
-item response
-- how to clear the terminal screen after pressing the menu item, then run the function, and press any key to return
-*/
 
 func newClientFromEnviroment() (*azcosmos.Client, error) {
 	endpoint := os.Getenv("AZURE_COSMOS_ENDPOINT")
@@ -172,7 +165,7 @@ func queryCustomer(client *azcosmos.Client, containerName, databaseName, partiti
 func getCustomer(client *azcosmos.Client, databaseName, containerName, partitionKey, id string) (map[string]interface{}, error) {
 	pk := azcosmos.NewPartitionKeyString(partitionKey)
 
-	log.Printf("\nExecuting a point read against:\n PK [%v] \n ID [%v]\n", pk, id)
+	log.Printf("\nExecuting a point read against:\n PK: %v \n ID: %v\n\n", pk, id)
 
 	container, err := client.NewContainer(databaseName, containerName)
 	if err != nil {
@@ -191,7 +184,7 @@ func getCustomer(client *azcosmos.Client, databaseName, containerName, partition
 	if err != nil {
 		return nil, err
 	}
-	log.Printf("\nItem [%v] read.\n Status %d.\n ActivityId %s.\n Consuming %v RU\n", pk, itemResponse.RawResponse.StatusCode, itemResponse.ActivityID, itemResponse.RequestCharge)
+	log.Printf("\nItem %v read.\n Status:\t%d.\n ActivityId:\t%s.\n Request Units:\t%v\n", pk, itemResponse.RawResponse.StatusCode, itemResponse.ActivityID, itemResponse.RequestCharge)
 	return item, nil
 }
 
@@ -314,7 +307,7 @@ func UpdateCategoryName(client *azcosmos.Client, databaseName, categoryID, categ
 		return err
 	}
 
-	// update value field
+	// update value ie. fields id, type, value 
 	item["value"] = categoryName
 
 	b, err := json.Marshal(item)
@@ -509,7 +502,8 @@ func DeleteCustomerOrder(client *azcosmos.Client, databaseName, containerName, o
 }
 
 func GetTop10Customers (client *azcosmos.Client, databaseName, containerName string) error {
-	//Query to get our top 10 customers
+	//Query to get our top 10 customers. Currently only for a single customer id. 
+	//TODO - Need to return all customers and pull out customer name and order qty and order by in code.
 	customerId := "FFCAE1E9-7E8D-457B-8435-BB7992C6D8BF"
 	pk := azcosmos.NewPartitionKeyString(customerId)
 
@@ -661,7 +655,7 @@ func pointRead(client *azcosmos.Client, databaseName, containerName, partitionKe
 	log.Printf("Item [%v] read. Status %d. ActivityId %s. Consuming %v RU\n", pk, itemResponse.RawResponse.StatusCode, itemResponse.ActivityID, itemResponse.RequestCharge)
 	return item, nil
 }
-func testImport(client *azcosmos.Client, url1, pk, databaseName, containerName string) error {
+func ImportData(client *azcosmos.Client, url1, pk, databaseName, containerName string) error {
 
 	res, err := http.Get(url1)
 	if err != nil {
@@ -724,6 +718,81 @@ func testImport(client *azcosmos.Client, url1, pk, databaseName, containerName s
 	return nil
 }
 
+func UpdateSalesOrderQty(client *azcosmos.Client, databaseName, containerName, customerID string, item map[string]interface{}) error {
+	log.Printf("Creating a new Sales Order for customer %v in %v\\%v\n",customerID, databaseName, containerName)
+	partitionKey := azcosmos.NewPartitionKeyString(customerID)
+
+	container, err := client.NewContainer(databaseName, containerName)
+	if err != nil {
+		return err
+	}
+
+	itemResponse, err := container.ReadItem(context.Background(), partitionKey, customerID, nil)
+	if err != nil {
+		var responseErr *azcore.ResponseError
+		errors.As(err, &responseErr)
+		return err
+	}	
+	customer := map[string]interface{}{}
+	itemID := customer["id"]
+	customer["salesOrderCount"] = "3"
+	strItemID := fmt.Sprintf("%v", itemID)
+	//_ = strItemID
+
+	err = json.Unmarshal(itemResponse.Value, &customer)
+	if err != nil {
+		return err
+	}
+
+	marshalledCustomer, err := json.Marshal(customer)
+	if err != nil {
+		return err
+	}
+	fmt.Printf("Customer:\n%s\n", marshalledCustomer)
+
+	marshalledSalesOrder, err := json.Marshal(item)
+	if err != nil {
+		return err
+	}
+	fmt.Printf("Sales Order:\n%s\n", marshalledSalesOrder)
+
+	batch := container.NewTransactionalBatch(partitionKey)
+
+	// ...
+	batch.CreateItem(marshalledSalesOrder, nil)
+	batch.ReplaceItem(strItemID, marshalledCustomer, nil)
+	// ...
+
+	batchResponse, err := container.ExecuteTransactionalBatch(context.Background(), batch, nil)
+	if err != nil {
+		return err
+	}
+
+	if batchResponse.Success {
+		// Transaction succeeded
+		// We can inspect the individual operation results
+		for index, operation := range batchResponse.OperationResults {
+			fmt.Printf("Operation %v completed with status code %v consumed %v RU", index, operation.StatusCode, operation.RequestCharge)
+			if index == 1 {
+				// Read operation would have body available
+				var itemResponseBody map[string]string
+				err = json.Unmarshal(operation.ResourceBody, &itemResponseBody)
+				if err != nil {
+					return err
+				}
+			}
+		}
+	} else {
+		// Transaction failed, look for the offending operation
+		for index, operation := range batchResponse.OperationResults {
+			if operation.StatusCode != http.StatusFailedDependency {
+				log.Printf("Transaction failed due to operation %v which failed with status code %v", index, operation.StatusCode)
+			}
+		}
+	}
+	return nil
+}
+
 func main() {
 	if err := run(); err != nil {
 		log.Fatal(err)
@@ -740,7 +809,6 @@ func run() error {
 		return err
 	}
 
-// Fix up lettering
 	prompt := `Azure Cosmos DB Golang SDK Examples
 -----------------------------------------
 [a]   Query for single customer
@@ -761,13 +829,16 @@ func run() error {
 [x]   Exit
 
 > `
-
+/*TODO 
+- clear the terminal screen after selection, press any key to return etc.
+- order map return json
+*/
 out:
 	for {
-		fmt.Print(prompt)
+		fmt.Print("\n"+prompt)
 		result := ""
 		fmt.Scanln((&result))
-		fmt.Printf("\nYour selection is: %v\n", result)
+		fmt.Printf("\nYour selection is: %v\n\n", result)
 
 		switch result {
 		case "a":
@@ -808,6 +879,7 @@ out:
 			}
 		case "e":
 			// TODO - need to validate if the logic is correct
+			//Change feed is a good option here
 			databaseName := "database-v3"
 			err := QueryProductsForCategory(client, databaseName, "product")
 			if err != nil {
@@ -864,7 +936,7 @@ out:
 						"sku": "HL-U509-B"
 					}
 				],
-				"id": "000C23D8-B8BC-432E-9213-6473DFDA2BC5",
+				"id": "",
 				"orderDate": "2014-02-16T00:00:00",
 				"shipDate": "2014-02-23T00:00:00",
 				"type": "salesOrder"
@@ -888,10 +960,18 @@ out:
 			}
 
 			// check UUID option
-			customerID = uuid.New().String()
-			item["customerId"] = customerID
+			//customerID = uuid.New().String()
+			//item["customerId"] = customerID
+			orderID := uuid.New().String()
+			item["id"] = orderID
 
-			err = CreateNewOrderAndUpdateCustomerOrderTotal(client, databaseName, containerName, customerID, item)
+
+			/*err = CreateNewOrderAndUpdateCustomerOrderTotal(client, databaseName, containerName, customerID, item)
+			if err != nil {
+				return err
+			}
+			*/
+			err = UpdateSalesOrderQty(client, databaseName, containerName, customerID, item)
 			if err != nil {
 				return err
 			}
@@ -917,55 +997,62 @@ out:
 				Database  string
 				Container string
 			}{
-				/* 				{
+				{
 					URL:       "https://raw.githubusercontent.com/MicrosoftDocs/mslearn-cosmosdb-modules-central/main/data/fullset/database-v2/customer",
 					PK:        "id",
 					Database:  "database-v2",
 					Container: "customer",
-				}, */
-				/* 				{
+				}, 
+				{
 					URL:       "https://raw.githubusercontent.com/MicrosoftDocs/mslearn-cosmosdb-modules-central/main/data/fullset/database-v2/productCategory",
 					PK:        "type",
 					Database:  "database-v2",
 					Container: "productCategory",
-				}, */
+				},
 				{
 					URL:       "https://raw.githubusercontent.com/MicrosoftDocs/mslearn-cosmosdb-modules-central/main/data/fullset/database-v3/product",
 					PK:        "categoryId",
 					Database:  "database-v3",
 					Container: "product",
 				},
-				/* 				{
+				{
 					URL:       "https://raw.githubusercontent.com/MicrosoftDocs/mslearn-cosmosdb-modules-central/main/data/fullset/database-v3/productCategory",
 					PK:        "type",
 					Database:  "database-v3",
 					Container: "productCategory",
-				}, */
-				/* {
+				},
+				{
 					URL:       "https://raw.githubusercontent.com/MicrosoftDocs/mslearn-cosmosdb-modules-central/main/data/fullset/database-v4/customer",
 					PK:        "customerId",
 					Database:  "database-v4",
 					Container: "customer",
-				}, */
-				/* {
+				},
+				{
 					URL:       "https://raw.githubusercontent.com/MicrosoftDocs/mslearn-cosmosdb-modules-central/main/data/fullset/database-v4/product",
 					PK:        "categoryId",
 					Database:  "database-v4",
 					Container: "product",
-				}, */
-				/* 				{
+				},
+				{
 					URL:       "https://raw.githubusercontent.com/MicrosoftDocs/mslearn-cosmosdb-modules-central/main/data/fullset/database-v4/productMeta",
 					PK:        "type",
 					Database:  "database-v4",
 					Container: "productMeta",
-				}, */
+				},
+				/*
+				{ //TODO how to work with value in JSON that is int not string.
+					URL:       "https://griffinbird.blob.core.windows.net/inflationcalc/InfCal-Cosmos.json",
+					PK:        "categoryId",
+					Database:  "inflationcalc",
+					Container: "cnt-infcal-dev",
+				},*/
 			}
 
 			for _, item := range imports {
 				// deleteContainer
 				// createContainer + handle errors...
 				log.Printf("importing Container %s from URL %s", item.Container, item.URL)
-				err := testImport(client, item.URL, item.PK, item.Database, item.Container)
+				err := ImportData(client, item.URL, item.PK, item.Database, item.Container)
 				if err != nil {
 					return err
 				}
@@ -987,7 +1074,7 @@ out:
 		case "test":
 			url1 := "https://raw.githubusercontent.com/MicrosoftDocs/mslearn-cosmosdb-modules-central/main/data/fullset/database-v4/customer"
 			pk := "id"
-			err := testImport(client, url1, pk, "myDatabase", "container1")
+			err := ImportData(client, url1, pk, "myDatabase", "container1")
 			if err != nil {
 				return err
 			}
