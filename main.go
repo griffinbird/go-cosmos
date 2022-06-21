@@ -19,6 +19,322 @@ import (
 	"github.com/google/uuid"
 )
 
+func main() {
+	if err := run(); err != nil {
+		log.Fatal(err)
+	}
+}
+
+func run() error {
+	databaseName := "database-v4"
+	containerName := "customer"
+
+	client, err := newClientFromEnviroment()
+	if err != nil {
+		return err
+	}
+
+	prompt := `Azure Cosmos DB Golang SDK Examples
+-----------------------------------------
+[a]   Query for single customer
+[b]   Point read for single customer
+[c]   List all product categories
+[d]   Query products by category id
+[e]   Update product category name
+[f]   Query orders by customer id
+[g]   Query for customer and all orders
+[h]   Create new order and update order total
+[i]   Delete order and update order total
+[j]   Query top 10 customers
+-------------------------------------------
+[k]   Create databases and containers
+[l]   Upload data to containers
+[m]   Delete databases and containers
+-------------------------------------------
+[x]   Exit
+
+> `
+
+	// TODO:
+	//  - clear the terminal screen after selection, press any key to return etc.
+	//  - order map return json
+
+out:
+	for {
+		fmt.Print("\n" + prompt)
+		result := ""
+		fmt.Scanln((&result))
+		fmt.Printf("\nYour selection is: %v\n\n", result)
+
+		switch result {
+		case "a":
+			pk := "FFCAE1E9-7E8D-457B-8435-BB7992C6D8BF"
+			databaseName := "database-v2"
+			containerName := "customer"
+			err := queryCustomer(client, containerName, databaseName, pk)
+			if err != nil {
+				return err
+			}
+
+		case "b":
+			pk := "FFCAE1E9-7E8D-457B-8435-BB7992C6D8BF"
+			id := "FFCAE1E9-7E8D-457B-8435-BB7992C6D8BF"
+			databaseName := "database-v2"
+			containerName := "customer"
+			item, err := getCustomer(client, databaseName, containerName, pk, id)
+			if err != nil {
+				return err
+			}
+			b, err := json.MarshalIndent(item, "", "    ")
+			if err != nil {
+				return err
+			}
+			fmt.Printf("%s\n", b)
+
+		case "c":
+			databaseName := "database-v2"
+			containerName := "productCategory"
+			err := ListAllProductCategories(client, containerName, databaseName)
+			if err != nil {
+				return err
+			}
+
+		case "d":
+			databaseName := "database-v4"
+			containerName := "product"
+			err := QueryProductsByCategoryId(client, databaseName, containerName)
+			if err != nil {
+				return err
+			}
+
+		case "e":
+			// TODO - need to validate if the logic is correct
+			//Change feed is a good option here
+			databaseName := "database-v3"
+			err := QueryProductsForCategory(client, databaseName, "product")
+			if err != nil {
+				return err
+			}
+			categoryId := "86F3CBAB-97A7-4D01-BABB-ADEFFFAED6B4"
+			categoryName1 := "Accessories, Tires and Tubes"
+			categoryName2 := "Accessories, Tires & Tubes"
+			err = UpdateCategoryName(client, databaseName, categoryId, categoryName1)
+			if err != nil {
+				return err
+			}
+			err = QueryProductsForCategory(client, databaseName, "product")
+			if err != nil {
+				return err
+			}
+			err = UpdateCategoryName(client, databaseName, categoryId, categoryName2)
+			if err != nil {
+				return err
+			}
+			err = RevertProductCategory(client, databaseName, "productCategory")
+			if err != nil {
+				return err
+			}
+
+		case "f":
+			databaseName := "database-v4"
+			containerName := "customer"
+			err := QuerySalesOrdersByCustomerId(client, containerName, databaseName)
+			if err != nil {
+				return err
+			}
+
+		case "g":
+			databaseName := "database-v4"
+			containerName := "customer"
+			err := QueryCustomerAndSalesOrdersByCustomerId(client, containerName, databaseName)
+			if err != nil {
+				return err
+			}
+
+		case "h":
+			b := `
+			{
+				"customerId": "54AB87A7-BDB9-4FAE-A668-AA9F43E26628",
+				"details": [
+					{
+						"name": "Road-550-W Yellow, 42",
+						"price": 1120.49,
+						"quantity": 1,
+						"sku": "BK-R64Y-42"
+					},
+					{
+						"name": "Sport-100 Helmet, Blue",
+						"price": 34.99,
+						"quantity": 1,
+						"sku": "HL-U509-B"
+					}
+				],
+				"id": "",
+				"orderDate": "2014-02-16T00:00:00",
+				"shipDate": "2014-02-23T00:00:00",
+				"type": "salesOrder"
+			}			
+			`
+
+			item := map[string]interface{}{}
+			err := json.Unmarshal([]byte(b), &item)
+			if err != nil {
+				return err
+			}
+
+			customerID := ""
+			if item, ok := item["customerId"]; ok {
+				if val, ok := item.(string); ok {
+					customerID = val
+				}
+			}
+
+			if customerID == "" {
+				return errors.New("customerID is empty")
+			}
+
+			// check UUID option
+			//customerID = uuid.New().String()
+			//item["customerId"] = customerID
+			orderID := uuid.New().String()
+			item["id"] = orderID
+
+			// TODO: make batch updates work
+			/*
+				err = CreateNewOrderAndUpdateCustomerOrderTotal(client, databaseName, containerName, customerID, item)
+				if err != nil {
+					return err
+				}
+			*/
+			err = UpdateSalesOrderQty(client, databaseName, containerName, customerID, item)
+			if err != nil {
+				return err
+			}
+
+		case "i":
+			orderId := "000C23D8-B8BC-432E-9213-6473DFDA2BC5"
+			customerId := "54AB87A7-BDB9-4FAE-A668-AA9F43E26628"
+			if err := DeleteCustomerOrder(client, databaseName, containerName, orderId, customerId); err != nil {
+				return err
+			}
+
+		case "j":
+			if err := GetTop10Customers(client, databaseName, containerName); err != nil {
+				return err
+			}
+
+		case "k":
+			if err := CreateDatabase(client); err != nil {
+				return err
+			}
+
+		case "l":
+			imports := []struct {
+				URL       string
+				PK        string
+				Database  string
+				Container string
+			}{
+				{
+					URL:       "https://raw.githubusercontent.com/MicrosoftDocs/mslearn-cosmosdb-modules-central/main/data/fullset/database-v2/customer",
+					PK:        "id",
+					Database:  "database-v2",
+					Container: "customer",
+				},
+				{
+					URL:       "https://raw.githubusercontent.com/MicrosoftDocs/mslearn-cosmosdb-modules-central/main/data/fullset/database-v2/productCategory",
+					PK:        "type",
+					Database:  "database-v2",
+					Container: "productCategory",
+				},
+				{
+					URL:       "https://raw.githubusercontent.com/MicrosoftDocs/mslearn-cosmosdb-modules-central/main/data/fullset/database-v3/product",
+					PK:        "categoryId",
+					Database:  "database-v3",
+					Container: "product",
+				},
+				{
+					URL:       "https://raw.githubusercontent.com/MicrosoftDocs/mslearn-cosmosdb-modules-central/main/data/fullset/database-v3/productCategory",
+					PK:        "type",
+					Database:  "database-v3",
+					Container: "productCategory",
+				},
+				{
+					URL:       "https://raw.githubusercontent.com/MicrosoftDocs/mslearn-cosmosdb-modules-central/main/data/fullset/database-v4/customer",
+					PK:        "customerId",
+					Database:  "database-v4",
+					Container: "customer",
+				},
+				{
+					URL:       "https://raw.githubusercontent.com/MicrosoftDocs/mslearn-cosmosdb-modules-central/main/data/fullset/database-v4/product",
+					PK:        "categoryId",
+					Database:  "database-v4",
+					Container: "product",
+				},
+				{
+					URL:       "https://raw.githubusercontent.com/MicrosoftDocs/mslearn-cosmosdb-modules-central/main/data/fullset/database-v4/productMeta",
+					PK:        "type",
+					Database:  "database-v4",
+					Container: "productMeta",
+				},
+			}
+
+			for _, item := range imports {
+				// create the container
+				err := createContainer(client, item.Database, item.Container, "/"+item.PK)
+				if err != nil {
+					return err
+				}
+				// ImportData
+				log.Printf("importing Container %s from URL %s", item.Container, item.URL)
+				err = ImportData(client, item.URL, item.PK, item.Database, item.Container)
+				if err != nil {
+					return err
+				}
+			}
+
+		case "m":
+			if err := DeleteDatabase(client); err != nil {
+				return err
+			}
+
+		case "x":
+			fmt.Println("exiting...")
+			break out
+
+		case "delete-item":
+			pk := "category"
+			id := "9a4f11d3-a60b-4baf-b8c2-bf83c1ff404b"
+			_, err := deleteItem(client, "database-v4", "productMeta", pk, id)
+			if err != nil {
+				return err
+			}
+
+		case "test":
+			tmp := struct {
+				URL       string
+				PK        string
+				Database  string
+				Container string
+			}{
+				URL:       "https://raw.githubusercontent.com/MicrosoftDocs/mslearn-cosmosdb-modules-central/main/data/fullset/database-v2/customer",
+				PK:        "/id",
+				Database:  "database-v2",
+				Container: "customer",
+			}
+
+			err := createContainer(client, tmp.Database, tmp.Container, tmp.PK)
+			if err != nil {
+				return err
+			}
+
+		default:
+			return errors.New("command doesn't exist. exiting")
+		}
+	}
+	return nil
+}
+
 func newClientFromEnviroment() (*azcosmos.Client, error) {
 	endpoint := os.Getenv("AZURE_COSMOS_ENDPOINT")
 	if endpoint == "" {
@@ -767,322 +1083,6 @@ func UpdateSalesOrderQty(client *azcosmos.Client, databaseName, containerName, c
 			if operation.StatusCode != http.StatusFailedDependency {
 				log.Printf("Transaction failed due to operation %v which failed with status code %v", index, operation.StatusCode)
 			}
-		}
-	}
-	return nil
-}
-
-func main() {
-	if err := run(); err != nil {
-		log.Fatal(err)
-	}
-}
-
-func run() error {
-	databaseName := "database-v4"
-	containerName := "customer"
-
-	client, err := newClientFromEnviroment()
-	if err != nil {
-		return err
-	}
-
-	prompt := `Azure Cosmos DB Golang SDK Examples
------------------------------------------
-[a]   Query for single customer
-[b]   Point read for single customer
-[c]   List all product categories
-[d]   Query products by category id
-[e]   Update product category name
-[f]   Query orders by customer id
-[g]   Query for customer and all orders
-[h]   Create new order and update order total
-[i]   Delete order and update order total
-[j]   Query top 10 customers
--------------------------------------------
-[k]   Create databases and containers
-[l]   Upload data to containers
-[m]   Delete databases and containers
--------------------------------------------
-[x]   Exit
-
-> `
-
-	// TODO:
-	//  - clear the terminal screen after selection, press any key to return etc.
-	//  - order map return json
-
-out:
-	for {
-		fmt.Print("\n" + prompt)
-		result := ""
-		fmt.Scanln((&result))
-		fmt.Printf("\nYour selection is: %v\n\n", result)
-
-		switch result {
-		case "a":
-			pk := "FFCAE1E9-7E8D-457B-8435-BB7992C6D8BF"
-			databaseName := "database-v2"
-			containerName := "customer"
-			err := queryCustomer(client, containerName, databaseName, pk)
-			if err != nil {
-				return err
-			}
-
-		case "b":
-			pk := "FFCAE1E9-7E8D-457B-8435-BB7992C6D8BF"
-			id := "FFCAE1E9-7E8D-457B-8435-BB7992C6D8BF"
-			databaseName := "database-v2"
-			containerName := "customer"
-			item, err := getCustomer(client, databaseName, containerName, pk, id)
-			if err != nil {
-				return err
-			}
-			b, err := json.MarshalIndent(item, "", "    ")
-			if err != nil {
-				return err
-			}
-			fmt.Printf("%s\n", b)
-
-		case "c":
-			databaseName := "database-v2"
-			containerName := "productCategory"
-			err := ListAllProductCategories(client, containerName, databaseName)
-			if err != nil {
-				return err
-			}
-
-		case "d":
-			databaseName := "database-v4"
-			containerName := "product"
-			err := QueryProductsByCategoryId(client, databaseName, containerName)
-			if err != nil {
-				return err
-			}
-
-		case "e":
-			// TODO - need to validate if the logic is correct
-			//Change feed is a good option here
-			databaseName := "database-v3"
-			err := QueryProductsForCategory(client, databaseName, "product")
-			if err != nil {
-				return err
-			}
-			categoryId := "86F3CBAB-97A7-4D01-BABB-ADEFFFAED6B4"
-			categoryName1 := "Accessories, Tires and Tubes"
-			categoryName2 := "Accessories, Tires & Tubes"
-			err = UpdateCategoryName(client, databaseName, categoryId, categoryName1)
-			if err != nil {
-				return err
-			}
-			err = QueryProductsForCategory(client, databaseName, "product")
-			if err != nil {
-				return err
-			}
-			err = UpdateCategoryName(client, databaseName, categoryId, categoryName2)
-			if err != nil {
-				return err
-			}
-			err = RevertProductCategory(client, databaseName, "productCategory")
-			if err != nil {
-				return err
-			}
-
-		case "f":
-			databaseName := "database-v4"
-			containerName := "customer"
-			err := QuerySalesOrdersByCustomerId(client, containerName, databaseName)
-			if err != nil {
-				return err
-			}
-
-		case "g":
-			databaseName := "database-v4"
-			containerName := "customer"
-			err := QueryCustomerAndSalesOrdersByCustomerId(client, containerName, databaseName)
-			if err != nil {
-				return err
-			}
-
-		case "h":
-			b := `
-			{
-				"customerId": "54AB87A7-BDB9-4FAE-A668-AA9F43E26628",
-				"details": [
-					{
-						"name": "Road-550-W Yellow, 42",
-						"price": 1120.49,
-						"quantity": 1,
-						"sku": "BK-R64Y-42"
-					},
-					{
-						"name": "Sport-100 Helmet, Blue",
-						"price": 34.99,
-						"quantity": 1,
-						"sku": "HL-U509-B"
-					}
-				],
-				"id": "",
-				"orderDate": "2014-02-16T00:00:00",
-				"shipDate": "2014-02-23T00:00:00",
-				"type": "salesOrder"
-			}			
-			`
-
-			item := map[string]interface{}{}
-			err := json.Unmarshal([]byte(b), &item)
-			if err != nil {
-				return err
-			}
-
-			customerID := ""
-			if item, ok := item["customerId"]; ok {
-				if val, ok := item.(string); ok {
-					customerID = val
-				}
-			}
-
-			if customerID == "" {
-				return errors.New("customerID is empty")
-			}
-
-			// check UUID option
-			//customerID = uuid.New().String()
-			//item["customerId"] = customerID
-			orderID := uuid.New().String()
-			item["id"] = orderID
-
-			// TODO: make batch updates work
-			/*
-				err = CreateNewOrderAndUpdateCustomerOrderTotal(client, databaseName, containerName, customerID, item)
-				if err != nil {
-					return err
-				}
-			*/
-			err = UpdateSalesOrderQty(client, databaseName, containerName, customerID, item)
-			if err != nil {
-				return err
-			}
-
-		case "i":
-			orderId := "000C23D8-B8BC-432E-9213-6473DFDA2BC5"
-			customerId := "54AB87A7-BDB9-4FAE-A668-AA9F43E26628"
-			if err := DeleteCustomerOrder(client, databaseName, containerName, orderId, customerId); err != nil {
-				return err
-			}
-
-		case "j":
-			if err := GetTop10Customers(client, databaseName, containerName); err != nil {
-				return err
-			}
-
-		case "k":
-			if err := CreateDatabase(client); err != nil {
-				return err
-			}
-
-		case "l":
-			imports := []struct {
-				URL       string
-				PK        string
-				Database  string
-				Container string
-			}{
-				{
-					URL:       "https://raw.githubusercontent.com/MicrosoftDocs/mslearn-cosmosdb-modules-central/main/data/fullset/database-v2/customer",
-					PK:        "id",
-					Database:  "database-v2",
-					Container: "customer",
-				},
-				{
-					URL:       "https://raw.githubusercontent.com/MicrosoftDocs/mslearn-cosmosdb-modules-central/main/data/fullset/database-v2/productCategory",
-					PK:        "type",
-					Database:  "database-v2",
-					Container: "productCategory",
-				},
-				{
-					URL:       "https://raw.githubusercontent.com/MicrosoftDocs/mslearn-cosmosdb-modules-central/main/data/fullset/database-v3/product",
-					PK:        "categoryId",
-					Database:  "database-v3",
-					Container: "product",
-				},
-				{
-					URL:       "https://raw.githubusercontent.com/MicrosoftDocs/mslearn-cosmosdb-modules-central/main/data/fullset/database-v3/productCategory",
-					PK:        "type",
-					Database:  "database-v3",
-					Container: "productCategory",
-				},
-				{
-					URL:       "https://raw.githubusercontent.com/MicrosoftDocs/mslearn-cosmosdb-modules-central/main/data/fullset/database-v4/customer",
-					PK:        "customerId",
-					Database:  "database-v4",
-					Container: "customer",
-				},
-				{
-					URL:       "https://raw.githubusercontent.com/MicrosoftDocs/mslearn-cosmosdb-modules-central/main/data/fullset/database-v4/product",
-					PK:        "categoryId",
-					Database:  "database-v4",
-					Container: "product",
-				},
-				{
-					URL:       "https://raw.githubusercontent.com/MicrosoftDocs/mslearn-cosmosdb-modules-central/main/data/fullset/database-v4/productMeta",
-					PK:        "type",
-					Database:  "database-v4",
-					Container: "productMeta",
-				},
-			}
-
-			for _, item := range imports {
-				// create the container
-				err := createContainer(client, item.Database, item.Container, "/"+item.PK)
-				if err != nil {
-					return err
-				}
-				// ImportData
-				log.Printf("importing Container %s from URL %s", item.Container, item.URL)
-				err = ImportData(client, item.URL, item.PK, item.Database, item.Container)
-				if err != nil {
-					return err
-				}
-			}
-
-		case "m":
-			if err := DeleteDatabase(client); err != nil {
-				return err
-			}
-
-		case "x":
-			fmt.Println("exiting...")
-			break out
-
-		case "delete-item":
-			pk := "category"
-			id := "9a4f11d3-a60b-4baf-b8c2-bf83c1ff404b"
-			_, err := deleteItem(client, "database-v4", "productMeta", pk, id)
-			if err != nil {
-				return err
-			}
-
-		case "test":
-			tmp := struct {
-				URL       string
-				PK        string
-				Database  string
-				Container string
-			}{
-				URL:       "https://raw.githubusercontent.com/MicrosoftDocs/mslearn-cosmosdb-modules-central/main/data/fullset/database-v2/customer",
-				PK:        "/id",
-				Database:  "database-v2",
-				Container: "customer",
-			}
-
-			err := createContainer(client, tmp.Database, tmp.Container, tmp.PK)
-			if err != nil {
-				return err
-			}
-
-		default:
-			return errors.New("command doesn't exist. exiting")
 		}
 	}
 	return nil
