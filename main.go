@@ -19,7 +19,6 @@ import (
 	"github.com/google/uuid"
 )
 
-
 func newClientFromEnviroment() (*azcosmos.Client, error) {
 	endpoint := os.Getenv("AZURE_COSMOS_ENDPOINT")
 	if endpoint == "" {
@@ -56,35 +55,14 @@ func newClientFromEnviroment() (*azcosmos.Client, error) {
 	return client, nil
 }
 
-func createContainer(databaseName string, containerName string, partitionKey string) {
-	fmt.Printf("\nCreating container [%v] in database [%v]\n", containerName, databaseName)
-
-	endpoint, ok := os.LookupEnv("AZURE_COSMOS_ENDPOINT")
-	if !ok {
-		panic("AZURE_COSMOS_ENDPOINT could not be found")
-	}
-
-	key, ok := os.LookupEnv("AZURE_COSMOS_KEY")
-	if !ok {
-		panic("AZURE_COSMOS_KEY could not be found")
-	}
-
-	fmt.Println(os.ExpandEnv("Using Cosmos DB Endpoint $AZURE_COSMOS_ENDPOINT"))
-
-	cred, err := azcosmos.NewKeyCredential(key)
-	if err != nil {
-		panic(err)
-	}
-
-	client, err := azcosmos.NewClientWithKey(endpoint, cred, nil)
-	if err != nil {
-		panic(err)
-	}
+func createContainer(client *azcosmos.Client, databaseName string, containerName string, partitionKey string) error {
+	log.Printf("\nCreating container [%v] in database [%v]\n", containerName, databaseName)
 
 	database, err := client.NewDatabase(databaseName)
 	if err != nil {
-		panic(err)
+		return err
 	}
+
 	containerProperties := azcosmos.ContainerProperties{
 		ID: containerName,
 		PartitionKeyDefinition: azcosmos.PartitionKeyDefinition{
@@ -92,6 +70,7 @@ func createContainer(databaseName string, containerName string, partitionKey str
 		},
 	}
 	throughput := azcosmos.NewManualThroughputProperties(400)
+
 	containerResp, err := database.CreateContainer(context.Background(), containerProperties, &azcosmos.CreateContainerOptions{ThroughputProperties: &throughput})
 
 	if err != nil {
@@ -100,11 +79,12 @@ func createContainer(databaseName string, containerName string, partitionKey str
 		if responseErr.ErrorCode == "Conflict" {
 			log.Printf("Container [%v] already exists\n", containerName)
 		} else {
-			panic(responseErr)
+			return err
 		}
 	} else {
-		fmt.Printf("Container [%v] created. ActivityId %s\n", containerName, containerResp.ActivityID)
+		log.Printf("Container [%v] created. ActivityId %s\n", containerName, containerResp.ActivityID)
 	}
+	return nil
 }
 
 func deleteItem(client *azcosmos.Client, databaseName, containerName, partitionKey, id string) (map[string]interface{}, error) {
@@ -307,7 +287,7 @@ func UpdateCategoryName(client *azcosmos.Client, databaseName, categoryID, categ
 		return err
 	}
 
-	// update value ie. fields id, type, value 
+	// update value ie. fields id, type, value
 	item["value"] = categoryName
 
 	b, err := json.Marshal(item)
@@ -440,7 +420,7 @@ func QueryCustomerAndSalesOrdersByCustomerId(client *azcosmos.Client, containerN
 }
 
 func CreateNewOrderAndUpdateCustomerOrderTotal(client *azcosmos.Client, databaseName, containerName, id string, item map[string]interface{}) error {
-	log.Printf("Creating a new Order %v in %v\\%v\n",id, databaseName, containerName)
+	log.Printf("Creating a new Order %v in %v\\%v\n", id, databaseName, containerName)
 
 	container, err := client.NewContainer(databaseName, containerName)
 	if err != nil {
@@ -501,8 +481,8 @@ func DeleteCustomerOrder(client *azcosmos.Client, databaseName, containerName, o
 	return err
 }
 
-func GetTop10Customers (client *azcosmos.Client, databaseName, containerName string) error {
-	//Query to get our top 10 customers. Currently only for a single customer id. 
+func GetTop10Customers(client *azcosmos.Client, databaseName, containerName string) error {
+	//Query to get our top 10 customers. Currently only for a single customer id.
 	//TODO - Need to return all customers and pull out customer name and order qty and order by in code.
 	customerId := "FFCAE1E9-7E8D-457B-8435-BB7992C6D8BF"
 	pk := azcosmos.NewPartitionKeyString(customerId)
@@ -515,8 +495,8 @@ func GetTop10Customers (client *azcosmos.Client, databaseName, containerName str
 		return err
 	}
 	query := "SELECT TOP 10 c.firstName, c.lastName, c.salesOrderCount " +
-	"FROM c WHERE c.type = 'customer' " +
-	"ORDER BY c.salesOrderCount DESC"
+		"FROM c WHERE c.type = 'customer' " +
+		"ORDER BY c.salesOrderCount DESC"
 	queryPager := container.NewQueryItemsPager(query, pk, &azcosmos.QueryOptions{PopulateIndexMetrics: true})
 	for queryPager.More() {
 		queryResponse, err := queryPager.NextPage(context.Background())
@@ -539,8 +519,6 @@ func GetTop10Customers (client *azcosmos.Client, databaseName, containerName str
 		log.Printf("Query page received with %d items. Status %d. ActivityId %s. Consuming %v RU\n", len(queryResponse.Items), queryResponse.RawResponse.StatusCode, queryResponse.ActivityID, queryResponse.RequestCharge)
 	}
 	return nil
-
-
 }
 
 func DeleteDatabase(client *azcosmos.Client) error {
@@ -655,6 +633,7 @@ func pointRead(client *azcosmos.Client, databaseName, containerName, partitionKe
 	log.Printf("Item [%v] read. Status %d. ActivityId %s. Consuming %v RU\n", pk, itemResponse.RawResponse.StatusCode, itemResponse.ActivityID, itemResponse.RequestCharge)
 	return item, nil
 }
+
 func ImportData(client *azcosmos.Client, url1, pk, databaseName, containerName string) error {
 
 	res, err := http.Get(url1)
@@ -719,7 +698,7 @@ func ImportData(client *azcosmos.Client, url1, pk, databaseName, containerName s
 }
 
 func UpdateSalesOrderQty(client *azcosmos.Client, databaseName, containerName, customerID string, item map[string]interface{}) error {
-	log.Printf("Creating a new Sales Order for customer %v in %v\\%v\n",customerID, databaseName, containerName)
+	log.Printf("Creating a new Sales Order for customer %v in %v\\%v\n", customerID, databaseName, containerName)
 	partitionKey := azcosmos.NewPartitionKeyString(customerID)
 
 	container, err := client.NewContainer(databaseName, containerName)
@@ -732,7 +711,7 @@ func UpdateSalesOrderQty(client *azcosmos.Client, databaseName, containerName, c
 		var responseErr *azcore.ResponseError
 		errors.As(err, &responseErr)
 		return err
-	}	
+	}
 	customer := map[string]interface{}{}
 	itemID := customer["id"]
 	customer["salesOrderCount"] = "3"
@@ -802,7 +781,6 @@ func main() {
 func run() error {
 	databaseName := "database-v4"
 	containerName := "customer"
-	//partitionKey := "type"
 
 	client, err := newClientFromEnviroment()
 	if err != nil {
@@ -829,13 +807,14 @@ func run() error {
 [x]   Exit
 
 > `
-/*TODO 
-- clear the terminal screen after selection, press any key to return etc.
-- order map return json
-*/
+
+	// TODO:
+	//  - clear the terminal screen after selection, press any key to return etc.
+	//  - order map return json
+
 out:
 	for {
-		fmt.Print("\n"+prompt)
+		fmt.Print("\n" + prompt)
 		result := ""
 		fmt.Scanln((&result))
 		fmt.Printf("\nYour selection is: %v\n\n", result)
@@ -849,6 +828,7 @@ out:
 			if err != nil {
 				return err
 			}
+
 		case "b":
 			pk := "FFCAE1E9-7E8D-457B-8435-BB7992C6D8BF"
 			id := "FFCAE1E9-7E8D-457B-8435-BB7992C6D8BF"
@@ -863,6 +843,7 @@ out:
 				return err
 			}
 			fmt.Printf("%s\n", b)
+
 		case "c":
 			databaseName := "database-v2"
 			containerName := "productCategory"
@@ -870,6 +851,7 @@ out:
 			if err != nil {
 				return err
 			}
+
 		case "d":
 			databaseName := "database-v4"
 			containerName := "product"
@@ -877,6 +859,7 @@ out:
 			if err != nil {
 				return err
 			}
+
 		case "e":
 			// TODO - need to validate if the logic is correct
 			//Change feed is a good option here
@@ -904,6 +887,7 @@ out:
 			if err != nil {
 				return err
 			}
+
 		case "f":
 			databaseName := "database-v4"
 			containerName := "customer"
@@ -911,6 +895,7 @@ out:
 			if err != nil {
 				return err
 			}
+
 		case "g":
 			databaseName := "database-v4"
 			containerName := "customer"
@@ -918,6 +903,7 @@ out:
 			if err != nil {
 				return err
 			}
+
 		case "h":
 			b := `
 			{
@@ -942,6 +928,7 @@ out:
 				"type": "salesOrder"
 			}			
 			`
+
 			item := map[string]interface{}{}
 			err := json.Unmarshal([]byte(b), &item)
 			if err != nil {
@@ -965,31 +952,35 @@ out:
 			orderID := uuid.New().String()
 			item["id"] = orderID
 
-
-			/*err = CreateNewOrderAndUpdateCustomerOrderTotal(client, databaseName, containerName, customerID, item)
-			if err != nil {
-				return err
-			}
+			// TODO: make batch updates work
+			/*
+				err = CreateNewOrderAndUpdateCustomerOrderTotal(client, databaseName, containerName, customerID, item)
+				if err != nil {
+					return err
+				}
 			*/
 			err = UpdateSalesOrderQty(client, databaseName, containerName, customerID, item)
 			if err != nil {
 				return err
 			}
+
 		case "i":
 			orderId := "000C23D8-B8BC-432E-9213-6473DFDA2BC5"
 			customerId := "54AB87A7-BDB9-4FAE-A668-AA9F43E26628"
-			if err := DeleteCustomerOrder(client, databaseName, containerName, orderId, customerId ); err != nil {
+			if err := DeleteCustomerOrder(client, databaseName, containerName, orderId, customerId); err != nil {
 				return err
 			}
+
 		case "j":
 			if err := GetTop10Customers(client, databaseName, containerName); err != nil {
 				return err
 			}
+
 		case "k":
 			if err := CreateDatabase(client); err != nil {
 				return err
 			}
-			//createContainer(databaseName, containerName, partitionKey)
+
 		case "l":
 			imports := []struct {
 				URL       string
@@ -1002,7 +993,7 @@ out:
 					PK:        "id",
 					Database:  "database-v2",
 					Container: "customer",
-				}, 
+				},
 				{
 					URL:       "https://raw.githubusercontent.com/MicrosoftDocs/mslearn-cosmosdb-modules-central/main/data/fullset/database-v2/productCategory",
 					PK:        "type",
@@ -1039,31 +1030,31 @@ out:
 					Database:  "database-v4",
 					Container: "productMeta",
 				},
-				/*
-				{ //TODO how to work with value in JSON that is int not string.
-					URL:       "https://griffinbird.blob.core.windows.net/inflationcalc/InfCal-Cosmos.json",
-					PK:        "categoryId",
-					Database:  "inflationcalc",
-					Container: "cnt-infcal-dev",
-				},*/
 			}
 
 			for _, item := range imports {
-				// deleteContainer
-				// createContainer + handle errors...
+				// create the container
+				err := createContainer(client, item.Database, item.Container, "/"+item.PK)
+				if err != nil {
+					return err
+				}
+				// ImportData
 				log.Printf("importing Container %s from URL %s", item.Container, item.URL)
-				err := ImportData(client, item.URL, item.PK, item.Database, item.Container)
+				err = ImportData(client, item.URL, item.PK, item.Database, item.Container)
 				if err != nil {
 					return err
 				}
 			}
+
 		case "m":
 			if err := DeleteDatabase(client); err != nil {
 				return err
 			}
+
 		case "x":
 			fmt.Println("exiting...")
 			break out
+
 		case "delete-item":
 			pk := "category"
 			id := "9a4f11d3-a60b-4baf-b8c2-bf83c1ff404b"
@@ -1071,13 +1062,25 @@ out:
 			if err != nil {
 				return err
 			}
+
 		case "test":
-			url1 := "https://raw.githubusercontent.com/MicrosoftDocs/mslearn-cosmosdb-modules-central/main/data/fullset/database-v4/customer"
-			pk := "id"
-			err := ImportData(client, url1, pk, "myDatabase", "container1")
+			tmp := struct {
+				URL       string
+				PK        string
+				Database  string
+				Container string
+			}{
+				URL:       "https://raw.githubusercontent.com/MicrosoftDocs/mslearn-cosmosdb-modules-central/main/data/fullset/database-v2/customer",
+				PK:        "/id",
+				Database:  "database-v2",
+				Container: "customer",
+			}
+
+			err := createContainer(client, tmp.Database, tmp.Container, tmp.PK)
 			if err != nil {
 				return err
 			}
+
 		default:
 			return errors.New("command doesn't exist. exiting")
 		}
