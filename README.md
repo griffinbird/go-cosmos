@@ -1,6 +1,6 @@
 # go-cosmos
 
-A sample app using the [Azure SDK for Cosmos DB](github.com/Azure/azure-sdk-for-go/sdk/data/azcosmos) with Cosmos DB (SQL).
+A sample app using the [Azure Cosmos DB SDK for Go](https://pkg.go.dev/github.com/Azure/azure-sdk-for-go/sdk/data/azcosmos) with Cosmos DB (SQL).
 
 ## Connect with NewDefaultAzureCredential
 
