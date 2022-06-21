@@ -1,6 +1,12 @@
 # go-cosmos
 
-## connect with defaultcredential
+A sample app using the [Azure SDK for Cosmos DB](github.com/Azure/azure-sdk-for-go/sdk/data/azcosmos) with Cosmos DB (SQL).
+
+## Connect with NewDefaultAzureCredential
+
+For most use cases you will use the `azidentity.NewDefaultAzureCredential` which will automatically authenticate across a range of options from local Azure CLI (during development) to Managed Identity (in production) without account keys.
+
+You will need to create and assign a role using the bash snippets below, or the script at [data/role-assign-create.sh](./data/role-assign-create.sh).
 
 ```bash
 RESOURCE_GROUP='220600-cosmos-db'
@@ -11,7 +17,13 @@ export AZURE_COSMOS_ENDPOINT="https://${COSMOS_ACCOUNT_NAME}.documents.azure.com
 go run .
 ```
 
-## connect with account key
+## Connect with Cosmos DB Account Key
+
+If you are using this CLI to automatically create your databases (`database-v*`), via command `k`, this is a control plane, rather than a data plane operation, and you will need to temporarily use the Cosmos DB account key.
+
+This CLI will automatically create a client with `azcosmos.NewClientWithKey` rather than `azidentity.NewDefaultAzureCredential`, if the `AZURE_COSMOS_KEY` is populated.
+
+However, it is more secure to use the `azidentity.NewDefaultAzureCredential` option above in production.
 
 ```bash
 RESOURCE_GROUP='220600-cosmos-db'
@@ -28,9 +40,11 @@ export AZURE_COSMOS_KEY="$(az cosmosdb keys list \
 go run .
 ```
 
-## create role for logged-in azure cli user
+## Create and Assign Role for Logged-in Azure CLI user
 
-Use script
+Use script at [data/role-assign-create.sh](./data/role-assign-create.sh) or paste the below into your terminal.
+
+Update the values for `RESOURCE_GROUP` and `COSMOS_ACCOUNT_NAME` as neccessary.
 
 ```bash
 cd data/
