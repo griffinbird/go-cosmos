@@ -44,6 +44,8 @@ go run .
 
 Use script at [data/role-assign-create.sh](./data/role-assign-create.sh) or paste the below into your terminal.
 
+Please ensure you are using the latest version of the Azure CLI (run `az upgrade`) due to [recent changes](https://docs.microsoft.com/cli/azure/microsoft-graph-migration) in `az ad` commands.
+
 Update the values for `RESOURCE_GROUP` and `COSMOS_ACCOUNT_NAME` as neccessary.
 
 ```bash
