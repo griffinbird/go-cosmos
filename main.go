@@ -153,9 +153,10 @@ out:
 			}
 
 		case "h":
+			// salesOrder
 			b := `
 			{
-				"customerId": "54AB87A7-BDB9-4FAE-A668-AA9F43E26628",
+				"customerId": "0012D555-C7DE-4C4B-B4A4-2E8A6B8E1161",
 				"details": [
 					{
 						"name": "Road-550-W Yellow, 42",
@@ -183,6 +184,8 @@ out:
 				return err
 			}
 
+			// get the customerID so we can update the
+			// customer's salesOrderQuantity
 			customerID := ""
 			if item, ok := item["customerId"]; ok {
 				if val, ok := item.(string); ok {
@@ -194,19 +197,11 @@ out:
 				return errors.New("customerID is empty")
 			}
 
-			// check UUID option
-			//customerID = uuid.New().String()
-			//item["customerId"] = customerID
+			// create a new order from the above sample snippet
+			// with a new id that we generate.
 			orderID := uuid.New().String()
 			item["id"] = orderID
 
-			// TODO: make batch updates work
-			/*
-				err = CreateNewOrderAndUpdateCustomerOrderTotal(client, databaseName, containerName, customerID, item)
-				if err != nil {
-					return err
-				}
-			*/
 			err = UpdateSalesOrderQty(client, databaseName, containerName, customerID, item)
 			if err != nil {
 				return err
@@ -736,7 +731,7 @@ func QueryCustomerAndSalesOrdersByCustomerId(client *azcosmos.Client, containerN
 	return nil
 }
 
-func CreateNewOrderAndUpdateCustomerOrderTotal(client *azcosmos.Client, databaseName, containerName, id string, item map[string]interface{}) error {
+func CreateNewOrder(client *azcosmos.Client, databaseName, containerName, id string, item map[string]interface{}) error {
 	log.Printf("Creating a new Order %v in %v\\%v\n", id, databaseName, containerName)
 
 	container, err := client.NewContainer(databaseName, containerName)
@@ -1014,7 +1009,7 @@ func ImportData(client *azcosmos.Client, url1, pk, databaseName, containerName s
 	return nil
 }
 
-func UpdateSalesOrderQty(client *azcosmos.Client, databaseName, containerName, customerID string, item map[string]interface{}) error {
+func UpdateSalesOrderQty(client *azcosmos.Client, databaseName, containerName, customerID string, salesOrder map[string]interface{}) error {
 	log.Printf("Creating a new Sales Order for customer %v in %v\\%v\n", customerID, databaseName, containerName)
 	partitionKey := azcosmos.NewPartitionKeyString(customerID)
 
@@ -1029,36 +1024,50 @@ func UpdateSalesOrderQty(client *azcosmos.Client, databaseName, containerName, c
 		errors.As(err, &responseErr)
 		return err
 	}
-	customer := map[string]interface{}{}
-	itemID := customer["id"]
-	customer["salesOrderCount"] = "3"
-	strItemID := fmt.Sprintf("%v", itemID)
-	//_ = strItemID
 
+	customer := map[string]interface{}{}
 	err = json.Unmarshal(itemResponse.Value, &customer)
 	if err != nil {
 		return err
 	}
 
-	marshalledCustomer, err := json.Marshal(customer)
+	// MarshalIndent because we are also printing it out
+	customerJSON, err := json.MarshalIndent(customer, "", "    ")
 	if err != nil {
 		return err
 	}
-	fmt.Printf("Customer:\n%s\n", marshalledCustomer)
+	log.Printf("Customer:\n")
+	fmt.Printf("%s\n", customerJSON)
 
-	marshalledSalesOrder, err := json.Marshal(item)
+	salesOrderJSON, err := json.MarshalIndent(salesOrder, "", "    ")
 	if err != nil {
 		return err
 	}
-	fmt.Printf("Sales Order:\n%s\n", marshalledSalesOrder)
+	log.Printf("Sales Order:\n")
+	fmt.Printf("%s\n", salesOrderJSON)
+
+	salesOrderCount := 0.0
+	if val, ok := customer["salesOrderCount"]; ok {
+		if val, ok := val.(float64); ok {
+			salesOrderCount = val
+		} else {
+			return errors.New("salesOrderCount is not a float64")
+		}
+	}
+	salesOrderCount = salesOrderCount + 1
+	customer["salesOrderCount"] = salesOrderCount
+	customerJSON, err = json.MarshalIndent(customer, "", "    ")
+	if err != nil {
+		return err
+	}
+
+	log.Printf("Customer:\n")
+	fmt.Printf("%s\n", customerJSON)
+	customerID = customer["id"].(string)
 
 	batch := container.NewTransactionalBatch(partitionKey)
-
-	// ...
-	batch.CreateItem(marshalledSalesOrder, nil)
-	batch.ReplaceItem(strItemID, marshalledCustomer, nil)
-	// ...
-
+	batch.UpsertItem(salesOrderJSON, nil)
+	batch.ReplaceItem(customerID, customerJSON, nil)
 	batchResponse, err := container.ExecuteTransactionalBatch(context.Background(), batch, nil)
 	if err != nil {
 		return err
@@ -1068,15 +1077,7 @@ func UpdateSalesOrderQty(client *azcosmos.Client, databaseName, containerName, c
 		// Transaction succeeded
 		// We can inspect the individual operation results
 		for index, operation := range batchResponse.OperationResults {
-			fmt.Printf("Operation %v completed with status code %v consumed %v RU", index, operation.StatusCode, operation.RequestCharge)
-			if index == 1 {
-				// Read operation would have body available
-				var itemResponseBody map[string]string
-				err = json.Unmarshal(operation.ResourceBody, &itemResponseBody)
-				if err != nil {
-					return err
-				}
-			}
+			log.Printf("Operation %v completed with status code %v consumed %v RU", index, operation.StatusCode, operation.RequestCharge)
 		}
 	} else {
 		// Transaction failed, look for the offending operation
@@ -1085,6 +1086,7 @@ func UpdateSalesOrderQty(client *azcosmos.Client, databaseName, containerName, c
 				log.Printf("Transaction failed due to operation %v which failed with status code %v", index, operation.StatusCode)
 			}
 		}
+		return errors.New("ExecuteTransactionalBatch failed")
 	}
 	return nil
 }
