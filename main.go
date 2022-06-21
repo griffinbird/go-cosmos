@@ -34,7 +34,8 @@ func run() error {
 		return err
 	}
 
-	prompt := `Azure Cosmos DB Golang SDK Examples
+	prompt := `-----------------------------------------
+Azure Cosmos DB Golang SDK Examples
 -----------------------------------------
 [a]   Query for single customer
 [b]   Point read for single customer
