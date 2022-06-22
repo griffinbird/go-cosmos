@@ -16,7 +16,7 @@ import (
 	"github.com/Azure/azure-sdk-for-go/sdk/azcore"
 	"github.com/Azure/azure-sdk-for-go/sdk/azidentity"
 	"github.com/Azure/azure-sdk-for-go/sdk/data/azcosmos"
-	"github.com/google/uuid"
+	//"github.com/google/uuid" - required for new orderID generation 
 )
 
 func main() {
@@ -154,6 +154,7 @@ out:
 
 		case "h":
 			// salesOrder
+			// Autogenerate dates for orderDate and +7 days for shipping
 			b := `
 			{
 				"customerId": "0012D555-C7DE-4C4B-B4A4-2E8A6B8E1161",
@@ -198,8 +199,12 @@ out:
 			}
 
 			// create a new order from the above sample snippet
+			
 			// with a new id that we generate.
-			orderID := uuid.New().String()
+			//orderID := uuid.New().String()
+
+			// Use a static orderID so we can delete later (option "i") 
+			orderID :="8bdfc67f-2c68-40c5-9a36-2da649224c8b"
 			item["id"] = orderID
 
 			err = UpdateSalesOrderQty(client, databaseName, containerName, customerID, item)
@@ -208,12 +213,15 @@ out:
 			}
 
 		case "i":
-			orderId := "000C23D8-B8BC-432E-9213-6473DFDA2BC5"
-			customerId := "54AB87A7-BDB9-4FAE-A668-AA9F43E26628"
-			if err := DeleteCustomerOrder(client, databaseName, containerName, orderId, customerId); err != nil {
+			orderId := "8bdfc67f-2c68-40c5-9a36-2da649224c8b"
+			customerId := "0012D555-C7DE-4C4B-B4A4-2E8A6B8E1161"
+			if err := DeleteCustomerOrderAndUpdateSalesOrderQty(client, databaseName, containerName, orderId, customerId); err != nil {
 				return err
 			}
-
+			// Using transactional batch to handle sales order deletion
+			//if err := DeleteCustomerOrder(client, databaseName, containerName, orderId, customerId); err != nil {
+			//	return err
+			//}
 		case "j":
 			if err := GetTop10Customers(client, databaseName, containerName); err != nil {
 				return err
@@ -1068,6 +1076,85 @@ func UpdateSalesOrderQty(client *azcosmos.Client, databaseName, containerName, c
 	batch := container.NewTransactionalBatch(partitionKey)
 	batch.UpsertItem(salesOrderJSON, nil)
 	batch.ReplaceItem(customerID, customerJSON, nil)
+	batchResponse, err := container.ExecuteTransactionalBatch(context.Background(), batch, nil)
+	if err != nil {
+		return err
+	}
+
+	if batchResponse.Success {
+		// Transaction succeeded
+		// We can inspect the individual operation results
+		for index, operation := range batchResponse.OperationResults {
+			log.Printf("Operation %v completed with status code %v consumed %v RU", index, operation.StatusCode, operation.RequestCharge)
+		}
+	} else {
+		// Transaction failed, look for the offending operation
+		for index, operation := range batchResponse.OperationResults {
+			if operation.StatusCode != http.StatusFailedDependency {
+				log.Printf("Transaction failed due to operation %v which failed with status code %v", index, operation.StatusCode)
+			}
+		}
+		return errors.New("ExecuteTransactionalBatch failed")
+	}
+	return nil
+}
+
+func DeleteCustomerOrderAndUpdateSalesOrderQty(client *azcosmos.Client, databaseName, containerName, orderID, customerID string) error {
+	// TODO: We set a static orderID so we can delete later. We need to handle the transaction batch on error 404 if the
+	// orderID doesn't exist.
+
+	log.Printf("Deleting Sales Order %v for customer %v in %v\\%v\n", orderID, customerID, databaseName, containerName)
+	partitionKey := azcosmos.NewPartitionKeyString(customerID)
+
+	container, err := client.NewContainer(databaseName, containerName)
+	if err != nil {
+		return err
+	}
+
+	itemResponse, err := container.ReadItem(context.Background(), partitionKey, customerID, nil)
+	if err != nil {
+		var responseErr *azcore.ResponseError
+		errors.As(err, &responseErr)
+		return err
+	}
+
+	customer := map[string]interface{}{}
+	err = json.Unmarshal(itemResponse.Value, &customer)
+	if err != nil {
+		return err
+	}
+
+	// MarshalIndent because we are also printing it out
+	customerJSON, err := json.MarshalIndent(customer, "", "    ")
+	if err != nil {
+		return err
+	}
+	log.Printf("Customer:\n")
+	fmt.Printf("%s\n", customerJSON)
+ 
+	// Update the customer salessOrderCount
+	salesOrderCount := 0.0
+	if val, ok := customer["salesOrderCount"]; ok {
+		if val, ok := val.(float64); ok {
+			salesOrderCount = val
+		} else {
+			return errors.New("salesOrderCount is not a float64")
+		}
+	}
+	salesOrderCount = salesOrderCount - 1
+	customer["salesOrderCount"] = salesOrderCount
+	customerJSON, err = json.MarshalIndent(customer, "", "    ")
+	if err != nil {
+		return err
+	}
+
+	log.Printf("Customer:\n")
+	fmt.Printf("%s\n", customerJSON)
+	customerID = customer["id"].(string)
+
+	batch := container.NewTransactionalBatch(partitionKey)
+	batch.DeleteItem(orderID, nil)
+	batch.ReplaceItem(customerID, customerJSON, &azcosmos.TransactionalBatchItemOptions{})
 	batchResponse, err := container.ExecuteTransactionalBatch(context.Background(), batch, nil)
 	if err != nil {
 		return err
