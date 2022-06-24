@@ -16,7 +16,6 @@ import (
 	"github.com/Azure/azure-sdk-for-go/sdk/azcore"
 	"github.com/Azure/azure-sdk-for-go/sdk/azidentity"
 	"github.com/Azure/azure-sdk-for-go/sdk/data/azcosmos"
-	//"github.com/google/uuid" - required for new orderID generation 
 )
 
 func main() {
@@ -154,7 +153,7 @@ out:
 
 		case "h":
 			// salesOrder
-			// Autogenerate dates for orderDate and +7 days for shipping
+			// TODO: Autogenerate dates for orderDate and +7 days for shipping
 			b := `
 			{
 				"customerId": "0012D555-C7DE-4C4B-B4A4-2E8A6B8E1161",
@@ -199,12 +198,12 @@ out:
 			}
 
 			// create a new order from the above sample snippet
-			
-			// with a new id that we generate.
-			//orderID := uuid.New().String()
 
-			// Use a static orderID so we can delete later (option "i") 
-			orderID :="8bdfc67f-2c68-40c5-9a36-2da649224c8b"
+			// We would have generated a new uuid using
+			// github.com/google/uuid as follows:
+			// orderID := uuid.New().String()
+			// Instead, we use a static orderID so we can delete later (option "i")
+			orderID := "8bdfc67f-2c68-40c5-9a36-2da649224c8b"
 			item["id"] = orderID
 
 			err = UpdateSalesOrderQty(client, databaseName, containerName, customerID, item)
@@ -218,10 +217,7 @@ out:
 			if err := DeleteCustomerOrderAndUpdateSalesOrderQty(client, databaseName, containerName, orderId, customerId); err != nil {
 				return err
 			}
-			// Using transactional batch to handle sales order deletion
-			//if err := DeleteCustomerOrder(client, databaseName, containerName, orderId, customerId); err != nil {
-			//	return err
-			//}
+
 		case "j":
 			if err := GetTop10Customers(client, databaseName, containerName); err != nil {
 				return err
@@ -1131,8 +1127,8 @@ func DeleteCustomerOrderAndUpdateSalesOrderQty(client *azcosmos.Client, database
 	}
 	log.Printf("Customer:\n")
 	fmt.Printf("%s\n", customerJSON)
- 
-	// Update the customer salessOrderCount
+
+	// Update the customer salesOrderCount
 	salesOrderCount := 0.0
 	if val, ok := customer["salesOrderCount"]; ok {
 		if val, ok := val.(float64); ok {
